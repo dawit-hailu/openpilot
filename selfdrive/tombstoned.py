@@ -8,11 +8,11 @@ import subprocess
 import time
 import glob
 
-import sentry_sdk
+from raven import Client
+from raven.transport.http import HTTPTransport
 
-from common.params import Params
 from common.file_helpers import mkdirs_exists_ok
-from selfdrive.hardware import TICI, HARDWARE
+from selfdrive.hardware import TICI
 from selfdrive.loggerd.config import ROOT
 from selfdrive.swaglog import cloudlog
 from selfdrive.version import branch, commit, dirty, origin, version
@@ -31,15 +31,16 @@ def safe_fn(s):
   return "".join(c for c in s if c.isalnum() or c in extra).rstrip()
 
 
-def sentry_report(fn, message, contents):
+def sentry_report(client, fn, message, contents):
   cloudlog.error({'tombstone': message})
-
-  with sentry_sdk.configure_scope() as scope:
-      scope.set_extra("tombstone_fn", fn)
-      scope.set_extra("tombstone", contents)
-      sentry_sdk.capture_message(message=message)
-      sentry_sdk.flush()
-
+  client.captureMessage(
+    message=message,
+    sdk={'name': 'tombstoned', 'version': '0'},
+    extra={
+      'tombstone_fn': fn,
+      'tombstone': contents
+    },
+  )
 
 def clear_apport_folder():
   for f in glob.glob(APPORT_DIR + '*'):
@@ -76,7 +77,7 @@ def get_tombstones():
   return files
 
 
-def report_tombstone_android(fn):
+def report_tombstone_android(fn, client):
   f_size = os.path.getsize(fn)
   if f_size > MAX_SIZE:
     cloudlog.error(f"Tombstone {fn} too big, {f_size}. Skipping...")
@@ -92,32 +93,15 @@ def report_tombstone_android(fn):
   if name_idx >= 0:
     message = message[name_idx:]
 
-  executable = ""
-  start_exe_idx = message.find('>>> ')
-  end_exe_idx = message.find(' <<<')
-  if start_exe_idx >= 0 and end_exe_idx >= 0:
-    executable = message[start_exe_idx + 4:end_exe_idx]
-
   # Cut off fault addr
   fault_idx = message.find(', fault addr')
   if fault_idx >= 0:
     message = message[:fault_idx]
 
-  sentry_report(fn, message, contents)
-
-  # Copy crashlog to upload folder
-  clean_path = executable.replace('./', '').replace('/', '_')
-  date = datetime.datetime.now().strftime("%Y-%m-%d--%H-%M-%S")
-
-  new_fn = f"{date}_{commit[:8]}_{safe_fn(clean_path)}"[:MAX_TOMBSTONE_FN_LEN]
-
-  crashlog_dir = os.path.join(ROOT, "crash")
-  mkdirs_exists_ok(crashlog_dir)
-
-  shutil.copy(fn, os.path.join(crashlog_dir, new_fn))
+  sentry_report(client, fn, message, contents)
 
 
-def report_tombstone_apport(fn):
+def report_tombstone_apport(fn, client):
   f_size = os.path.getsize(fn)
   if f_size > MAX_SIZE:
     cloudlog.error(f"Tombstone {fn} too big, {f_size}. Skipping...")
@@ -177,7 +161,7 @@ def report_tombstone_apport(fn):
 
   contents = stacktrace + "\n\n" + contents
   message = message + " - " + crash_function
-  sentry_report(fn, message, contents)
+  sentry_report(client, fn, message, contents)
 
   # Copy crashlog to upload folder
   clean_path = path.replace('/', '_')
@@ -201,18 +185,15 @@ def main():
   clear_apport_folder()  # Clear apport folder on start, otherwise duplicate crashes won't register
   initial_tombstones = set(get_tombstones())
 
-  sentry_sdk.utils.MAX_STRING_LENGTH = 8192
-  sentry_sdk.init("https://a40f22e13cbc4261873333c125fc9d38@o33823.ingest.sentry.io/157615",
-                  default_integrations=False, release=version)
+  tags = {
+    'dirty': dirty,
+    'origin': origin,
+    'branch': branch
+  }
+  client = Client('https://d3b175702f62402c91ade04d1c547e68:b20d68c813c74f63a7cdf9c4039d8f56@sentry.io/157615',
+                  install_sys_hook=False, transport=HTTPTransport, release=version, tags=tags, string_max_length=10000)
 
-  dongle_id = Params().get("DongleId", encoding='utf-8')
-  sentry_sdk.set_user({"id": dongle_id})
-  sentry_sdk.set_tag("dirty", dirty)
-  sentry_sdk.set_tag("origin", origin)
-  sentry_sdk.set_tag("branch", branch)
-  sentry_sdk.set_tag("commit", commit)
-  sentry_sdk.set_tag("device", HARDWARE.get_device_type())
-
+  client.user_context({'id': os.environ.get('DONGLE_ID')})
   while True:
     now_tombstones = set(get_tombstones())
 
@@ -220,9 +201,9 @@ def main():
       try:
         cloudlog.info(f"reporting new tombstone {fn}")
         if fn.endswith(".crash"):
-          report_tombstone_apport(fn)
+          report_tombstone_apport(fn, client)
         else:
-          report_tombstone_android(fn)
+          report_tombstone_android(fn, client)
       except Exception:
         cloudlog.exception(f"Error reporting tombstone {fn}")
 

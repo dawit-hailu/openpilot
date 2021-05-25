@@ -9,6 +9,7 @@ from common.realtime import sec_since_boot
 from selfdrive.hardware import HARDWARE
 from selfdrive.swaglog import cloudlog
 
+PANDA_OUTPUT_VOLTAGE = 5.28
 CAR_VOLTAGE_LOW_PASS_K = 0.091 # LPF gain for 5s tau (dt/tau / (dt/tau + 1))
 
 # A C2 uses about 1W while idling, and 30h seens like a good shutoff for most cars
@@ -16,10 +17,12 @@ CAR_VOLTAGE_LOW_PASS_K = 0.091 # LPF gain for 5s tau (dt/tau / (dt/tau + 1))
 CAR_BATTERY_CAPACITY_uWh = 30e6
 CAR_CHARGING_RATE_W = 45
 
-VBATT_PAUSE_CHARGING = 11.0           # Lower limit on the LPF car battery voltage
-VBATT_INSTANT_PAUSE_CHARGING = 7.0    # Lower limit on the instant car battery voltage measurements to avoid triggering on instant power loss
+VBATT_PAUSE_CHARGING = 11.0
 MAX_TIME_OFFROAD_S = 30*3600
-MIN_ON_TIME_S = 3600
+
+def panda_current_to_actual_current(panda_current):
+  # From white/grey panda schematic
+  return (3.3 - (panda_current * 3.3 / 4096)) / 8.25
 
 class PowerMonitoring:
   def __init__(self):
@@ -29,7 +32,6 @@ class PowerMonitoring:
     self.power_used_uWh = 0                     # Integrated power usage in uWh since going into offroad
     self.next_pulsed_measurement_time = None
     self.car_voltage_mV = 12e3                  # Low-passed version of pandaState voltage
-    self.car_voltage_instant_mV = 12e3          # Last value of pandaState voltage
     self.integration_lock = threading.Lock()
 
     car_battery_capacity_uWh = self.params.get("CarBatteryCapacity")
@@ -54,7 +56,6 @@ class PowerMonitoring:
         return
 
       # Low-pass battery voltage
-      self.car_voltage_instant_mV = pandaState.pandaState.voltage
       self.car_voltage_mV = ((pandaState.pandaState.voltage * CAR_VOLTAGE_LOW_PASS_K) + (self.car_voltage_mV * (1 -  CAR_VOLTAGE_LOW_PASS_K)))
 
       # Cap the car battery power and save it in a param every 10-ish seconds
@@ -90,6 +91,11 @@ class PowerMonitoring:
           # If the battery is discharging, we can use this measurement
           # On C2: this is low by about 10-15%, probably mostly due to UNO draw not being factored in
           current_power = ((HARDWARE.get_battery_voltage() / 1000000) * (HARDWARE.get_battery_current() / 1000000))
+        elif (health.health.hwType in [log.HealthData.HwType.whitePanda, log.HealthData.HwType.greyPanda]) and (health.health.current > 1):
+          # If white/grey panda, use the integrated current measurements if the measurement is not 0
+          # If the measurement is 0, the current is 400mA or greater, and out of the measurement range of the panda
+          # This seems to be accurate to about 5%
+          current_power = (PANDA_OUTPUT_VOLTAGE * panda_current_to_actual_current(health.health.current))
         elif (self.next_pulsed_measurement_time is not None) and (self.next_pulsed_measurement_time <= now):
           # TODO: Figure out why this is off by a factor of 3/4???
           FUDGE_FACTOR = 1.33
@@ -165,25 +171,25 @@ class PowerMonitoring:
     now = sec_since_boot()
     disable_charging = False
     disable_charging |= (now - offroad_timestamp) > MAX_TIME_OFFROAD_S
-    disable_charging |= (self.car_voltage_mV < (VBATT_PAUSE_CHARGING * 1e3)) and (self.car_voltage_instant_mV > (VBATT_INSTANT_PAUSE_CHARGING * 1e3))
+    disable_charging |= (self.car_voltage_mV < (VBATT_PAUSE_CHARGING * 1e3))
     disable_charging |= (self.car_battery_capacity_uWh <= 0)
     disable_charging &= (not pandaState.pandaState.ignitionLine and not pandaState.pandaState.ignitionCan)
-    disable_charging &= (not self.params.get_bool("DisablePowerDown"))
-    disable_charging |= self.params.get_bool("ForcePowerDown")
+    disable_charging &= (self.params.get("DisablePowerDown") != b"1")
+    disable_charging |= (self.params.get("ForcePowerDown") == b"1")
     return disable_charging
 
   # See if we need to shutdown
-  def should_shutdown(self, pandaState, offroad_timestamp, started_seen):
+  def should_shutdown(self, pandaState, offroad_timestamp, started_seen, LEON):
     if pandaState is None or offroad_timestamp is None:
       return False
 
     now = sec_since_boot()
     panda_charging = (pandaState.pandaState.usbPowerMode != log.PandaState.UsbPowerMode.client)
-    BATT_PERC_OFF = 10
+    BATT_PERC_OFF = 10 if LEON else 3
 
     should_shutdown = False
     # Wait until we have shut down charging before powering down
     should_shutdown |= (not panda_charging and self.should_disable_charging(pandaState, offroad_timestamp))
     should_shutdown |= ((HARDWARE.get_battery_capacity() < BATT_PERC_OFF) and (not HARDWARE.get_battery_charging()) and ((now - offroad_timestamp) > 60))
-    should_shutdown &= started_seen or (now > MIN_ON_TIME_S)
+    should_shutdown &= started_seen
     return should_shutdown

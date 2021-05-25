@@ -1,18 +1,16 @@
 #pragma once
 
 #ifndef __user
-#define __user __attribute__(())
+  #define __user __attribute__(())
 #endif
 
-#include <CL/cl.h>
-#include <stdint.h>
 #include <stdlib.h>
-
+#include <stdint.h>
+#include "include/msm_kgsl.h"
+#include <vector>
 #include <memory>
 #include <string>
-#include <vector>
-
-#include "selfdrive/modeld/thneed/include/msm_kgsl.h"
+#include <CL/cl.h>
 
 #define THNEED_RECORD 1
 #define THNEED_DEBUG 2

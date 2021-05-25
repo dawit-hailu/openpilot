@@ -1,9 +1,7 @@
-#include <assert.h>
-
 #include <set>
-
+#include <assert.h>
+#include "thneed.h"
 #include "json11.hpp"
-#include "selfdrive/modeld/thneed/thneed.h"
 using namespace json11;
 
 extern map<cl_program, string> g_program_source;

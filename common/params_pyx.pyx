@@ -2,19 +2,82 @@
 # cython: language_level = 3
 from libcpp cimport bool
 from libcpp.string cimport string
-from common.params_pxd cimport Params as c_Params, ParamKeyType as c_ParamKeyType
+from common.params_pxd cimport Params as c_Params
 
 import os
 import threading
 from common.basedir import BASEDIR
 
+cdef enum TxType:
+  PERSISTENT = 1
+  CLEAR_ON_MANAGER_START = 2
+  CLEAR_ON_PANDA_DISCONNECT = 3
 
-cdef class ParamKeyType:
-  PERSISTENT = c_ParamKeyType.PERSISTENT
-  CLEAR_ON_MANAGER_START = c_ParamKeyType.CLEAR_ON_MANAGER_START
-  CLEAR_ON_PANDA_DISCONNECT = c_ParamKeyType.CLEAR_ON_PANDA_DISCONNECT
-  CLEAR_ON_IGNITION = c_ParamKeyType.CLEAR_ON_IGNITION
-  ALL = c_ParamKeyType.ALL
+keys = {
+  b"AccessToken": [TxType.CLEAR_ON_MANAGER_START],
+  b"AthenadPid": [TxType.PERSISTENT],
+  b"CalibrationParams": [TxType.PERSISTENT],
+  b"CarBatteryCapacity": [TxType.PERSISTENT],
+  b"CarParams": [TxType.CLEAR_ON_MANAGER_START, TxType.CLEAR_ON_PANDA_DISCONNECT],
+  b"CarParamsCache": [TxType.CLEAR_ON_MANAGER_START, TxType.CLEAR_ON_PANDA_DISCONNECT],
+  b"CarVin": [TxType.CLEAR_ON_MANAGER_START, TxType.CLEAR_ON_PANDA_DISCONNECT],
+  b"CommunityFeaturesToggle": [TxType.PERSISTENT],
+  b"CompletedTrainingVersion": [TxType.PERSISTENT],
+  b"DisablePowerDown": [TxType.PERSISTENT],
+  b"DisableUpdates": [TxType.PERSISTENT],
+  b"DoUninstall": [TxType.CLEAR_ON_MANAGER_START],
+  b"DongleId": [TxType.PERSISTENT],
+  b"GitBranch": [TxType.PERSISTENT],
+  b"GitCommit": [TxType.PERSISTENT],
+  b"GitRemote": [TxType.PERSISTENT],
+  b"GithubSshKeys": [TxType.PERSISTENT],
+  b"HardwareSerial": [TxType.PERSISTENT],
+  b"HasAcceptedTerms": [TxType.PERSISTENT],
+  b"HasCompletedSetup": [TxType.PERSISTENT],
+  b"IsDriverViewEnabled": [TxType.CLEAR_ON_MANAGER_START],
+  b"IMEI": [TxType.PERSISTENT],
+  b"IsLdwEnabled": [TxType.PERSISTENT],
+  b"IsMetric": [TxType.PERSISTENT],
+  b"IsOffroad": [TxType.CLEAR_ON_MANAGER_START],
+  b"IsRHD": [TxType.PERSISTENT],
+  b"IsTakingSnapshot": [TxType.CLEAR_ON_MANAGER_START],
+  b"IsUpdateAvailable": [TxType.CLEAR_ON_MANAGER_START],
+  b"IsUploadRawEnabled": [TxType.PERSISTENT],
+  b"LastAthenaPingTime": [TxType.PERSISTENT],
+  b"LastGPSPosition": [TxType.PERSISTENT],
+  b"LastUpdateException": [TxType.PERSISTENT],
+  b"LastUpdateTime": [TxType.PERSISTENT],
+  b"LiveParameters": [TxType.PERSISTENT],
+  b"OpenpilotEnabledToggle": [TxType.PERSISTENT],
+  b"LaneChangeEnabled": [TxType.PERSISTENT],
+  b"PandaFirmware": [TxType.CLEAR_ON_MANAGER_START, TxType.CLEAR_ON_PANDA_DISCONNECT],
+  b"PandaFirmwareHex": [TxType.CLEAR_ON_MANAGER_START, TxType.CLEAR_ON_PANDA_DISCONNECT],
+  b"PandaDongleId": [TxType.CLEAR_ON_MANAGER_START, TxType.CLEAR_ON_PANDA_DISCONNECT],
+  b"Passive": [TxType.PERSISTENT],
+  b"RecordFront": [TxType.PERSISTENT],
+  b"ReleaseNotes": [TxType.PERSISTENT],
+  b"ShouldDoUpdate": [TxType.CLEAR_ON_MANAGER_START],
+  b"SubscriberInfo": [TxType.PERSISTENT],
+  b"SshEnabled": [TxType.PERSISTENT],
+  b"TermsVersion": [TxType.PERSISTENT],
+  b"Timezone": [TxType.PERSISTENT],
+  b"TrainingVersion": [TxType.PERSISTENT],
+  b"UpdateAvailable": [TxType.CLEAR_ON_MANAGER_START],
+  b"UpdateFailedCount": [TxType.CLEAR_ON_MANAGER_START],
+  b"Version": [TxType.PERSISTENT],
+  b"VisionRadarToggle": [TxType.PERSISTENT],
+  b"Offroad_ChargeDisabled": [TxType.CLEAR_ON_MANAGER_START, TxType.CLEAR_ON_PANDA_DISCONNECT],
+  b"Offroad_ConnectivityNeeded": [TxType.CLEAR_ON_MANAGER_START],
+  b"Offroad_ConnectivityNeededPrompt": [TxType.CLEAR_ON_MANAGER_START],
+  b"Offroad_TemperatureTooHigh": [TxType.CLEAR_ON_MANAGER_START],
+  b"Offroad_PandaFirmwareMismatch": [TxType.CLEAR_ON_MANAGER_START, TxType.CLEAR_ON_PANDA_DISCONNECT],
+  b"Offroad_InvalidTime": [TxType.CLEAR_ON_MANAGER_START],
+  b"Offroad_IsTakingSnapshot": [TxType.CLEAR_ON_MANAGER_START],
+  b"Offroad_NeosUpdate": [TxType.CLEAR_ON_MANAGER_START],
+  b"Offroad_UpdateFailed": [TxType.CLEAR_ON_MANAGER_START],
+  b"Offroad_HardwareUnsupported": [TxType.CLEAR_ON_MANAGER_START],
+  b"ForcePowerDown": [TxType.CLEAR_ON_MANAGER_START],
+}
 
 def ensure_bytes(v):
   if isinstance(v, str):
@@ -39,21 +102,23 @@ cdef class Params:
     del self.p
 
   def clear_all(self, tx_type=None):
-    if tx_type is None:
-      tx_type = ParamKeyType.ALL
+    for key in keys:
+      if tx_type is None or tx_type in keys[key]:
+        self.delete(key)
 
-    self.p.clearAll(tx_type)
+  def manager_start(self):
+    self.clear_all(TxType.CLEAR_ON_MANAGER_START)
 
-  def check_key(self, key):
-    key = ensure_bytes(key)
-
-    if not self.p.checkKey(key):
-      raise UnknownKeyName(key)
-
-    return key
+  def panda_disconnect(self):
+    self.clear_all(TxType.CLEAR_ON_PANDA_DISCONNECT)
 
   def get(self, key, block=False, encoding=None):
-    cdef string k = self.check_key(key)
+    key = ensure_bytes(key)
+
+    if key not in keys:
+      raise UnknownKeyName(key)
+
+    cdef string k = key
     cdef bool b = block
 
     cdef string val
@@ -73,10 +138,6 @@ cdef class Params:
     else:
       return val
 
-  def get_bool(self, key):
-    cdef string k = self.check_key(key)
-    return self.p.getBool(k)
-
   def put(self, key, dat):
     """
     Warning: This function blocks until the param is written to disk!
@@ -84,24 +145,23 @@ cdef class Params:
     Use the put_nonblocking helper function in time sensitive code, but
     in general try to avoid writing params as much as possible.
     """
-    cdef string k = self.check_key(key)
+    key = ensure_bytes(key)
     dat = ensure_bytes(dat)
-    self.p.put(k, dat)
 
-  def put_bool(self, key, val):
-    cdef string k = self.check_key(key)
-    self.p.putBool(k, val)
+    if key not in keys:
+      raise UnknownKeyName(key)
+
+    self.p.write_db_value(key, dat)
 
   def delete(self, key):
-    cdef string k = self.check_key(key)
-    self.p.remove(k)
+    key = ensure_bytes(key)
+    self.p.delete_db_value(key)
 
 
 def put_nonblocking(key, val, d=None):
   def f(key, val):
     params = Params(d)
-    cdef string k = ensure_bytes(key)
-    params.put(k, val)
+    params.put(key, val)
 
   t = threading.Thread(target=f, args=(key, val))
   t.start()

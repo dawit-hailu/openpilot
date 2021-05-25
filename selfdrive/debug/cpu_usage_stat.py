@@ -24,16 +24,19 @@ import argparse
 import re
 from collections import defaultdict
 
-from selfdrive.manager.process_config import managed_processes
+import selfdrive.manager as manager
 
 # Do statistics every 5 seconds
 PRINT_INTERVAL = 5
 SLEEP_INTERVAL = 0.2
 
 monitored_proc_names = [
+  # offroad APK
+  'ai.comma.plus.offroad',
+
   # android procs
   'SurfaceFlinger', 'sensors.qcom'
-] + list(managed_processes.keys())
+] + manager.car_started_processes + manager.persistent_processes
 
 cpu_time_names = ['user', 'system', 'children_user', 'children_system']
 

@@ -1,19 +1,25 @@
-#include "setup.h"
-
 #include <QDebug>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
-#include <QPushButton>
-#include <QStackedWidget>
+#include <QStackedLayout>
 #include <QTimer>
 #include <QVBoxLayout>
-#include <QrCode.hpp>
 
-#include "selfdrive/common/params.h"
-#include "selfdrive/ui/qt/request_repeater.h"
+#include "QrCode.hpp"
+#include "api.hpp"
+#include "common/params.h"
+#include "common/util.h"
+#include "home.hpp"
+#include "setup.hpp"
 
 using qrcodegen::QrCode;
+
+#if defined(QCOM) || defined(QCOM2)
+const std::string private_key_path = "/persist/comma/id_rsa";
+#else
+const std::string private_key_path = util::getenv_default("HOME", "/.comma/persist/comma/id_rsa", "/persist/comma/id_rsa");
+#endif
 
 PairingQRWidget::PairingQRWidget(QWidget* parent) : QWidget(parent) {
   qrCode = new QLabel;
@@ -23,26 +29,26 @@ PairingQRWidget::PairingQRWidget(QWidget* parent) : QWidget(parent) {
   setLayout(v);
 
   QTimer* timer = new QTimer(this);
-  timer->start(30 * 1000);
-  connect(timer, &QTimer::timeout, this, &PairingQRWidget::refresh);
-}
-
-void PairingQRWidget::showEvent(QShowEvent *event){
-  refresh();
+  timer->start(30 * 1000);// HaLf a minute
+  connect(timer, SIGNAL(timeout()), this, SLOT(refresh()));
+  refresh(); // Not waiting for the first refresh
 }
 
 void PairingQRWidget::refresh(){
-  Params params;
-  QString IMEI = QString::fromStdString(params.get("IMEI"));
-  QString serial = QString::fromStdString(params.get("HardwareSerial"));
+  QString IMEI = QString::fromStdString(Params().get("IMEI"));
+  QString serial = QString::fromStdString(Params().get("HardwareSerial"));
 
   if (std::min(IMEI.length(), serial.length()) <= 5) {
     qrCode->setText("Error getting serial: contact support");
     qrCode->setWordWrap(true);
-    qrCode->setStyleSheet(R"(font-size: 60px;)");
+    qrCode->setStyleSheet(R"(
+      font-size: 60px;
+    )");
     return;
   }
-  QString pairToken = CommaApi::create_jwt({{"pair", true}});
+  QVector<QPair<QString, QJsonValue>> payloads;
+  payloads.push_back(qMakePair(QString("pair"), true));
+  QString pairToken = CommaApi::create_jwt(payloads);
 
   QString qrString = IMEI + "--" + serial + "--" + pairToken;
   this->updateQrCode(qrString);
@@ -51,7 +57,7 @@ void PairingQRWidget::refresh(){
 void PairingQRWidget::updateQrCode(QString text) {
   QrCode qr = QrCode::encodeText(text.toUtf8().data(), QrCode::Ecc::LOW);
   qint32 sz = qr.getSize();
-  // make the image larger so we can have a white border
+  // We make the image larger so we can have a white border
   QImage im(sz + 2, sz + 2, QImage::Format_RGB32);
   QRgb black = qRgb(0, 0, 0);
   QRgb white = qRgb(255, 255, 255);
@@ -74,58 +80,47 @@ void PairingQRWidget::updateQrCode(QString text) {
 
 PrimeUserWidget::PrimeUserWidget(QWidget* parent) : QWidget(parent) {
   mainLayout = new QVBoxLayout;
-  mainLayout->setMargin(30);
-
   QLabel* commaPrime = new QLabel("COMMA PRIME");
-  mainLayout->addWidget(commaPrime, 0, Qt::AlignTop);
+  commaPrime->setStyleSheet(R"(
+    font-size: 60px;
+  )");
+  mainLayout->addWidget(commaPrime);
 
-  username = new QLabel();
-  username->setStyleSheet("font-size: 55px;"); // TODO: fit width
-  mainLayout->addWidget(username, 0, Qt::AlignTop);
+  username = new QLabel("");
+  mainLayout->addWidget(username);
 
-  mainLayout->addSpacing(100);
+  mainLayout->addSpacing(200);
 
   QLabel* commaPoints = new QLabel("COMMA POINTS");
   commaPoints->setStyleSheet(R"(
+    font-size: 60px;
     color: #b8b8b8;
   )");
-  mainLayout->addWidget(commaPoints, 0, Qt::AlignTop);
+  mainLayout->addWidget(commaPoints);
 
-  points = new QLabel();
-  mainLayout->addWidget(points, 0, Qt::AlignTop);
+  points = new QLabel("");
+  mainLayout->addWidget(points);
 
   setLayout(mainLayout);
-  setStyleSheet(R"(
-    QLabel {
-      font-size: 70px;
-      font-weight: 500;
-    }
-  )");
-
-  // set up API requests
   QString dongleId = QString::fromStdString(Params().get("DongleId"));
-  if (!dongleId.length()) {
-    return;
-  }
-
   QString url = "https://api.commadotai.com/v1/devices/" + dongleId + "/owner";
-  RequestRepeater *repeater = new RequestRepeater(this, url, "ApiCache_Owner", 6);
-  QObject::connect(repeater, &RequestRepeater::receivedResponse, this, &PrimeUserWidget::replyFinished);
+  RequestRepeater* repeater = new RequestRepeater(this, url, 6);
+
+  QObject::connect(repeater, SIGNAL(receivedResponse(QString)), this, SLOT(replyFinished(QString)));
 }
 
-void PrimeUserWidget::replyFinished(const QString &response) {
+void PrimeUserWidget::replyFinished(QString response) {
   QJsonDocument doc = QJsonDocument::fromJson(response.toUtf8());
   if (doc.isNull()) {
     qDebug() << "JSON Parse failed on getting username and points";
     return;
   }
-
   QJsonObject json = doc.object();
-  QString points_str = QString::number(json["points"].toInt());
   QString username_str = json["username"].toString();
   if (username_str.length()) {
     username_str = "@" + username_str;
   }
+  QString points_str = QString::number(json["points"].toInt());
 
   username->setText(username_str);
   points->setText(points_str);
@@ -133,151 +128,149 @@ void PrimeUserWidget::replyFinished(const QString &response) {
 
 PrimeAdWidget::PrimeAdWidget(QWidget* parent) : QWidget(parent) {
   QVBoxLayout* vlayout = new QVBoxLayout;
-  vlayout->setMargin(30);
-  vlayout->setSpacing(15);
 
-  vlayout->addWidget(new QLabel("Upgrade now"), 1, Qt::AlignTop);
+  QLabel* upgradeNow = new QLabel("Upgrade now");
+  vlayout->addWidget(upgradeNow);
 
-  QLabel* description = new QLabel("Become a comma prime member at my.comma.ai and get premium features!");
+  QLabel* description = new QLabel("Become a comma prime member in the comma app and get premium features!");
   description->setStyleSheet(R"(
     font-size: 50px;
     color: #b8b8b8;
   )");
   description->setWordWrap(true);
-  vlayout->addWidget(description, 2, Qt::AlignTop);
+  vlayout->addWidget(description);
+
+  vlayout->addSpacing(50);
 
   QVector<QString> features = {"✓ REMOTE ACCESS", "✓ 14 DAYS OF STORAGE", "✓ DEVELOPER PERKS"};
-  for (auto &f: features) {
-    QLabel* feature = new QLabel(f);
-    feature->setStyleSheet(R"(font-size: 40px;)");
-    vlayout->addWidget(feature, 0, Qt::AlignBottom);
+  for (auto featureContent : features) {
+    QLabel* feature = new QLabel(featureContent);
+    feature->setStyleSheet(R"(
+      font-size: 40px;
+    )");
+
+    vlayout->addWidget(feature);
+    vlayout->addSpacing(15);
   }
 
   setLayout(vlayout);
 }
 
 
-SetupWidget::SetupWidget(QWidget* parent) : QFrame(parent) {
-  mainLayout = new QStackedWidget;
 
-  // Unpaired, registration prompt layout
+SetupWidget::SetupWidget(QWidget* parent) : QWidget(parent) {
+  QVBoxLayout* backgroundLayout = new QVBoxLayout;
+
+  backgroundLayout->addSpacing(100);
+
+  QFrame* background = new QFrame;
+
+  mainLayout = new QStackedLayout;
+
+  QWidget* blankWidget = new QWidget;
+  mainLayout->addWidget(blankWidget);
+
+  QWidget* finishRegistration = new QWidget;
 
   QVBoxLayout* finishRegistationLayout = new QVBoxLayout;
-  finishRegistationLayout->setMargin(30);
+  finishRegistationLayout->addSpacing(30);
+  QPushButton* finishButton = new QPushButton("Finish registration");
+  finishButton->setFixedHeight(200);
+  finishButton->setStyleSheet(R"(
+    border-radius: 30px;
+    font-size: 55px;
+    background: #585858;
+  )");
+  QObject::connect(finishButton, SIGNAL(released()), this, SLOT(showQrCode()));
+  finishRegistationLayout->addWidget(finishButton);
 
-  QLabel* registrationDescription = new QLabel("Pair your device with the comma connect app");
-  registrationDescription->setWordWrap(true);
-  registrationDescription->setAlignment(Qt::AlignCenter);
+  QLabel* registrationDescription = new QLabel("Pair your Comma device with the Comma Connect app");
   registrationDescription->setStyleSheet(R"(
     font-size: 55px;
     font-weight: 400;
   )");
 
+  registrationDescription->setWordWrap(true);
   finishRegistationLayout->addWidget(registrationDescription);
 
-  QPushButton* finishButton = new QPushButton("Finish setup");
-  finishButton->setFixedHeight(200);
-  finishButton->setStyleSheet(R"(
-    border-radius: 30px;
-    font-size: 55px;
-    font-weight: 500;
-    background: #585858;
-  )");
-  finishRegistationLayout->addWidget(finishButton);
-  QObject::connect(finishButton, &QPushButton::released, this, &SetupWidget::showQrCode);
-
-  QWidget* finishRegistration = new QWidget;
   finishRegistration->setLayout(finishRegistationLayout);
   mainLayout->addWidget(finishRegistration);
 
-  // Pairing QR code layout
-
   QVBoxLayout* qrLayout = new QVBoxLayout;
 
-  qrLayout->addSpacing(30);
-  QLabel* qrLabel = new QLabel("Scan with comma connect!");
-  qrLabel->setWordWrap(true);
-  qrLabel->setAlignment(Qt::AlignHCenter);
+  QLabel* qrLabel = new QLabel("Pair with Comma Connect app!");
   qrLabel->setStyleSheet(R"(
-    font-size: 55px;
-    font-weight: 400;
+    font-size: 40px;
   )");
-  qrLayout->addWidget(qrLabel, 0, Qt::AlignTop);
+  qrLayout->addWidget(qrLabel);
 
-  qrLayout->addWidget(new PairingQRWidget, 1);
+  qrLayout->addWidget(new PairingQRWidget);
 
   QWidget* q = new QWidget;
   q->setLayout(qrLayout);
   mainLayout->addWidget(q);
 
-  primeAd = new PrimeAdWidget;
+  PrimeAdWidget* primeAd = new PrimeAdWidget;
   mainLayout->addWidget(primeAd);
 
-  primeUser = new PrimeUserWidget;
-  mainLayout->addWidget(primeUser);
+  PrimeUserWidget* primeUserWidget = new PrimeUserWidget;
+  mainLayout->addWidget(primeUserWidget);
 
-  mainLayout->setCurrentWidget(primeAd);
-
-  QVBoxLayout *layout = new QVBoxLayout;
-  layout->addWidget(mainLayout);
-  setLayout(layout);
-
-  setStyleSheet(R"(
-    SetupWidget {
-      background-color: #292929;
-    }
-    * {
-      font-size: 90px;
-      font-weight: 500;
+  background->setLayout(mainLayout);
+  background->setStyleSheet(R"(
+    .QFrame {
       border-radius: 40px;
+      padding: 40px;
     }
   )");
+  backgroundLayout->addWidget(background);
+  setLayout(backgroundLayout);
 
-  // Retain size while hidden
-  QSizePolicy sp_retain = sizePolicy();
-  sp_retain.setRetainSizeWhenHidden(true);
-  setSizePolicy(sp_retain);
-
-  // set up API requests
   QString dongleId = QString::fromStdString(Params().get("DongleId"));
   QString url = "https://api.commadotai.com/v1.1/devices/" + dongleId + "/";
-  RequestRepeater* repeater = new RequestRepeater(this, url, "ApiCache_Device", 5);
+  RequestRepeater* repeater = new RequestRepeater(this, url, 5);
 
-  QObject::connect(repeater, &RequestRepeater::receivedResponse, this, &SetupWidget::replyFinished);
-  QObject::connect(repeater, &RequestRepeater::failedResponse, this, &SetupWidget::parseError);
-  hide(); // Only show when first request comes back
+  QObject::connect(repeater, SIGNAL(receivedResponse(QString)), this, SLOT(replyFinished(QString)));
+  QObject::connect(repeater, SIGNAL(failedResponse(QString)), this, SLOT(parseError(QString)));
+
 }
 
-void SetupWidget::parseError(const QString &response) {
-  show();
+void SetupWidget::parseError(QString response) {
   showQr = false;
   mainLayout->setCurrentIndex(0);
+  setStyleSheet(R"(
+    font-size: 90px;
+    background-color: #000000;
+  )");
 }
-
 void SetupWidget::showQrCode(){
   showQr = true;
-  mainLayout->setCurrentIndex(1);
+  mainLayout->setCurrentIndex(2);
 }
-
-void SetupWidget::replyFinished(const QString &response) {
-  show();
+void SetupWidget::replyFinished(QString response) {
   QJsonDocument doc = QJsonDocument::fromJson(response.toUtf8());
   if (doc.isNull()) {
     qDebug() << "JSON Parse failed on getting pairing and prime status";
     return;
   }
-
+  if (mainLayout->currentIndex() == 0) { // If we are still on the blank widget
+    setStyleSheet(R"(
+      font-size: 90px;
+      font-weight: bold;
+      background-color: #292929;
+    )");
+  }
   QJsonObject json = doc.object();
   bool is_paired = json["is_paired"].toBool();
   bool is_prime = json["prime"].toBool();
 
   if (!is_paired) {
-    mainLayout->setCurrentIndex(showQr);
-  } else if (!is_prime) {
+    mainLayout->setCurrentIndex(1 + showQr);
+  } else if (is_paired && !is_prime) {
     showQr = false;
-    mainLayout->setCurrentWidget(primeAd);
-  } else {
+    mainLayout->setCurrentIndex(3);
+  } else if (is_paired && is_prime) {
     showQr = false;
-    mainLayout->setCurrentWidget(primeUser);
+    mainLayout->setCurrentIndex(4);
   }
 }

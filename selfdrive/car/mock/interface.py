@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import math
 from cereal import car
 from selfdrive.config import Conversions as CV
 from selfdrive.swaglog import cloudlog
@@ -11,7 +10,7 @@ from selfdrive.car.interfaces import CarInterfaceBase
 TS = 0.01  # 100Hz
 YAW_FR = 0.2  # ~0.8s time constant on yaw rate filter
 # low pass gain
-LPG = 2 * math.pi * YAW_FR * TS / (1 + 2 * math.pi * YAW_FR * TS)
+LPG = 2 * 3.1415 * YAW_FR * TS / (1 + 2 * 3.1415 * YAW_FR * TS)
 
 
 class CarInterface(CarInterfaceBase):

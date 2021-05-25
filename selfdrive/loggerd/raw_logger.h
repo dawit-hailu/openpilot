@@ -2,19 +2,22 @@
 
 #include <cstdio>
 #include <cstdlib>
+
 #include <string>
 #include <vector>
+#include <mutex>
+#include <condition_variable>
 
 extern "C" {
+#include <libavutil/imgutils.h>
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
-#include <libavutil/imgutils.h>
 }
 
-#include "selfdrive/loggerd/encoder.h"
+#include "encoder.h"
 
 class RawLogger : public VideoEncoder {
- public:
+public:
   RawLogger(const char* filename, int width, int height, int fps,
             int bitrate, bool h265, bool downscale);
   ~RawLogger();
@@ -30,6 +33,8 @@ private:
   bool is_open = false;
 
   std::string vid_path, lock_path;
+
+  std::recursive_mutex lock;
 
   AVCodec *codec = NULL;
   AVCodecContext *codec_ctx = NULL;

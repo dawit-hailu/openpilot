@@ -33,30 +33,24 @@ def get_snapshots(frame="roadCameraState", front_frame="driverCameraState"):
   frame_sizes = [eon_f_frame_size, eon_d_frame_size, leon_d_frame_size, tici_f_frame_size]
   frame_sizes = {w * h: (w, h) for (w, h) in frame_sizes}
 
-  sockets = []
-  if frame is not None:
-    sockets.append(frame)
-  if front_frame is not None:
-    sockets.append(front_frame)
-
-  sm = messaging.SubMaster(sockets)
+  sm = messaging.SubMaster([frame, front_frame])
   while min(sm.logMonoTime.values()) == 0:
     sm.update()
 
-  rear = extract_image(sm[frame].image, frame_sizes) if frame is not None else None
-  front = extract_image(sm[front_frame].image, frame_sizes) if front_frame is not None else None
+  rear = extract_image(sm[frame].image, frame_sizes)
+  front = extract_image(sm[front_frame].image, frame_sizes)
   return rear, front
 
 
 def snapshot():
   params = Params()
-  front_camera_allowed = params.get_bool("RecordFront")
+  front_camera_allowed = int(params.get("RecordFront"))
 
-  if (not params.get_bool("IsOffroad")) or params.get_bool("IsTakingSnapshot"):
+  if params.get("IsOffroad") != b"1" or params.get("IsTakingSnapshot") == b"1":
     print("Already taking snapshot")
     return None, None
 
-  params.put_bool("IsTakingSnapshot", True)
+  params.put("IsTakingSnapshot", "1")
   set_offroad_alert("Offroad_IsTakingSnapshot", True)
   time.sleep(2.0)  # Give thermald time to read the param, or if just started give camerad time to start
 
@@ -65,7 +59,7 @@ def snapshot():
     subprocess.check_call(["pgrep", "camerad"])
 
     print("Camerad already running")
-    params.put_bool("IsTakingSnapshot", False)
+    params.put("IsTakingSnapshot", "0")
     params.delete("Offroad_IsTakingSnapshot")
     return None, None
   except subprocess.CalledProcessError:
@@ -74,22 +68,18 @@ def snapshot():
   env = os.environ.copy()
   env["SEND_ROAD"] = "1"
   env["SEND_WIDE_ROAD"] = "1"
-
-  if front_camera_allowed:
-    env["SEND_DRIVER"] = "1"
-
+  env["SEND_DRIVER"] = "1"
   proc = subprocess.Popen(os.path.join(BASEDIR, "selfdrive/camerad/camerad"),
                           cwd=os.path.join(BASEDIR, "selfdrive/camerad"), env=env)
   time.sleep(3.0)
 
   frame = "wideRoadCameraState" if TICI else "roadCameraState"
-  front_frame = "driverCameraState" if front_camera_allowed else None
-  rear, front = get_snapshots(frame, front_frame)
+  rear, front = get_snapshots(frame)
 
   proc.send_signal(signal.SIGINT)
   proc.communicate()
 
-  params.put_bool("IsTakingSnapshot", False)
+  params.put("IsTakingSnapshot", "0")
   set_offroad_alert("Offroad_IsTakingSnapshot", False)
 
   if not front_camera_allowed:

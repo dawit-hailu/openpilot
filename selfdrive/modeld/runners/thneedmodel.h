@@ -1,7 +1,7 @@
 #pragma once
 
-#include "selfdrive/modeld/runners/runmodel.h"
-#include "selfdrive/modeld/thneed/thneed.h"
+#include "runmodel.h"
+#include "thneed/thneed.h"
 
 class ThneedModel : public RunModel {
 public:

@@ -1,4 +1,5 @@
-#pragma once
+#ifndef COMMON_TIMING_H
+#define COMMON_TIMING_H
 
 #include <stdint.h>
 #include <time.h>
@@ -49,3 +50,5 @@ static inline uint64_t nanos_monotonic_raw() {
   clock_gettime(CLOCK_MONOTONIC_RAW, &t);
   return t.tv_sec * 1000000000ULL + t.tv_nsec;
 }
+
+#endif

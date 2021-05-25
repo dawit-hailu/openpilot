@@ -1,12 +1,11 @@
-#include "wifiManager.h"
-
-#include <stdlib.h>
-
 #include <algorithm>
 #include <set>
+#include <stdlib.h>
+#include <iostream>
 
-#include "selfdrive/common/params.h"
-#include "selfdrive/common/swaglog.h"
+#include "common/params.h"
+#include "common/swaglog.h"
+#include "wifiManager.hpp"
 
 /**
  * We are using a NetworkManager DBUS API : https://developer.gnome.org/NetworkManager/1.26/spec.html
@@ -222,7 +221,7 @@ void WifiManager::connect(QByteArray ssid, QString username, QString password, S
   Connection connection;
   connection["connection"]["type"] = "802-11-wireless";
   connection["connection"]["uuid"] = QUuid::createUuid().toString().remove('{').remove('}');
-  connection["connection"]["id"] = "openpilot connection "+QString::fromStdString(ssid.toStdString());
+  connection["connection"]["id"] = "OpenPilot connection "+QString::fromStdString(ssid.toStdString());
   connection["connection"]["autoconnect-retries"] = 0;
 
   connection["802-11-wireless"]["ssid"] = ssid;
@@ -394,8 +393,10 @@ void WifiManager::disconnect() {
 }
 
 QVector<QDBusObjectPath> WifiManager::list_connections(){
+  qDebug() << "list connections";
   QVector<QDBusObjectPath> connections;
   QDBusInterface nm(nm_service, nm_settings_path, nm_settings_iface, bus);
+  qDebug() << "here";
   nm.setTimeout(dbus_timeout);
 
   QDBusMessage response = nm.call("ListConnections");

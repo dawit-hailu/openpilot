@@ -1,14 +1,12 @@
-#include "selfdrive/common/i2c.h"
-
-#include <fcntl.h>
-#include <stdio.h>
-#include <sys/ioctl.h>
-#include <unistd.h>
+#include "i2c.h"
 
 #include <cassert>
+#include <unistd.h>
 #include <stdexcept>
-
-#include "selfdrive/common/swaglog.h"
+#include <stdio.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include "common/swaglog.h"
 
 #define UNUSED(x) (void)(x)
 

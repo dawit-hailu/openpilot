@@ -1,12 +1,11 @@
 #pragma once
 
-#include <map>
-
 #ifdef __APPLE__
-#include <OpenGL/gl3.h>
+  #include <OpenGL/gl3.h>
 #else
-#include <GLES3/gl3.h>
+  #include <GLES3/gl3.h>
 #endif
+#include <map>
 
 class GLShader {
 public:

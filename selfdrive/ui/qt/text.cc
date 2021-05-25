@@ -1,53 +1,37 @@
-#include <QApplication>
 #include <QLabel>
-#include <QPushButton>
-#include <QScrollBar>
-#include <QVBoxLayout>
 #include <QWidget>
+#include <QPushButton>
+#include <QVBoxLayout>
+#include <QApplication>
 
-#include "selfdrive/hardware/hw.h"
-#include "selfdrive/ui/qt/qt_window.h"
-#include "selfdrive/ui/qt/widgets/scrollview.h"
+#include "qt_window.hpp"
 
 int main(int argc, char *argv[]) {
   QApplication a(argc, argv);
   QWidget window;
   setMainWindow(&window);
 
-  Hardware::set_display_power(true);
-  Hardware::set_brightness(65);
+  QVBoxLayout *layout = new QVBoxLayout();
+  layout->setContentsMargins(125, 125, 125, 125);
 
-  QGridLayout *layout = new QGridLayout;
-  layout->setMargin(50);
-
-  QLabel *label = new QLabel(argv[1]);
-  label->setWordWrap(true);
-  label->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::MinimumExpanding);
-  ScrollView *scroll = new ScrollView(label);
-  scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-  layout->addWidget(scroll, 0, 0, Qt::AlignTop);
-
-  // Scroll to the bottom
-  QObject::connect(scroll->verticalScrollBar(), &QAbstractSlider::rangeChanged, [=](){
-    scroll->verticalScrollBar()->setValue(scroll->verticalScrollBar()->maximum());
-  });
+  // TODO: make this scroll
+  layout->addWidget(new QLabel(argv[1]), 0, Qt::AlignTop);
 
   QPushButton *btn = new QPushButton();
 #ifdef __aarch64__
   btn->setText("Reboot");
   QObject::connect(btn, &QPushButton::released, [=]() {
-    Hardware::reboot();
+    std::system("sudo reboot");
   });
 #else
   btn->setText("Exit");
-  QObject::connect(btn, &QPushButton::released, &a, &QApplication::quit);
+  QObject::connect(btn, SIGNAL(released()), &a, SLOT(quit()));
 #endif
-  layout->addWidget(btn, 0, 0, Qt::AlignRight | Qt::AlignBottom);
+  layout->addWidget(btn, 0, Qt::AlignRight);
 
   window.setLayout(layout);
   window.setStyleSheet(R"(
     * {
-      outline: none;
       color: white;
       background-color: black;
       font-size: 60px;
@@ -58,7 +42,6 @@ int main(int argc, char *argv[]) {
       padding-left: 100px;
       border: 2px solid white;
       border-radius: 20px;
-      margin-right: 40px;
     }
   )");
 

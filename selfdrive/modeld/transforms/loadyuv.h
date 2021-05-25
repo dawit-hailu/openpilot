@@ -1,8 +1,8 @@
 #pragma once
 
 #include <inttypes.h>
-
-#include "selfdrive/common/clutil.h"
+#include <stdbool.h>
+#include "clutil.h"
 
 typedef struct {
   int width, height;

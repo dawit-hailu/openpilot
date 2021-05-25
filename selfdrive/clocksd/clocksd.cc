@@ -1,8 +1,8 @@
-#include <stdint.h>
 #include <stdio.h>
+#include <stdint.h>
+#include <unistd.h>
 #include <sys/resource.h>
 #include <sys/time.h>
-#include <unistd.h>
 
 // Apple doesn't have timerfd
 #ifdef __APPLE__
@@ -14,9 +14,9 @@
 #include <cassert>
 #include <chrono>
 
-#include "cereal/messaging/messaging.h"
-#include "selfdrive/common/timing.h"
-#include "selfdrive/common/util.h"
+#include "messaging.hpp"
+#include "common/timing.h"
+#include "common/util.h"
 
 ExitHandler do_exit;
 

@@ -1,7 +1,6 @@
-#include "loadyuv.h"
-
-#include <assert.h>
 #include <string.h>
+#include <assert.h>
+#include "loadyuv.h"
 
 void loadyuv_init(LoadYUVState* s, cl_context ctx, cl_device_id device_id, int width, int height) {
   memset(s, 0, sizeof(*s));

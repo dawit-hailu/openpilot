@@ -1,10 +1,9 @@
-#include "selfdrive/common/glutil.h"
-
-#include <assert.h>
-#include <stdio.h>
 #include <stdlib.h>
-
+#include <stdio.h>
+#include <assert.h>
 #include <string>
+
+#include "glutil.h"
 
 static GLuint load_shader(GLenum shaderType, const char *src) {
   GLint status = 0, len = 0;

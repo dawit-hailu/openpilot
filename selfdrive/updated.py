@@ -119,7 +119,7 @@ def set_params(new_version: bool, failed_count: int, exception: Optional[str]) -
       params.put("ReleaseNotes", r + b"\n")
     except Exception:
       params.put("ReleaseNotes", "")
-    params.put_bool("UpdateAvailable", True)
+    params.put("UpdateAvailable", "1")
 
 
 def setup_git_options(cwd: str) -> None:
@@ -164,8 +164,7 @@ def init_overlay() -> None:
 
   cloudlog.info("preparing new safe staging area")
 
-  params = Params()
-  params.put_bool("UpdateAvailable", False)
+  Params().put("UpdateAvailable", "0")
   set_consistent_flag(False)
   dismount_overlay()
   if os.path.isdir(STAGING_ROOT):
@@ -196,10 +195,6 @@ def init_overlay() -> None:
     run(["sudo", "chmod", "755", os.path.join(OVERLAY_METADATA, "work")])
   else:
     run(mount_cmd)
-
-  git_diff = run(["git", "diff"], OVERLAY_MERGED, low_priority=True)
-  params.put("GitDiff", git_diff)
-  cloudlog.info(f"git diff output:\n{git_diff}")
 
 
 def finalize_update() -> None:
@@ -232,11 +227,9 @@ def handle_agnos_update(wait_helper):
   set_consistent_flag(False)
 
   cloudlog.info(f"Beginning background installation for AGNOS {updated_version}")
-  set_offroad_alert("Offroad_NeosUpdate", True)
 
   manifest_path = os.path.join(OVERLAY_MERGED, "selfdrive/hardware/tici/agnos.json")
   flash_agnos_update(manifest_path, cloudlog)
-  set_offroad_alert("Offroad_NeosUpdate", False)
 
 
 def handle_neos_update(wait_helper: WaitTimeHelper) -> None:
@@ -281,17 +274,12 @@ def check_git_fetch_result(fetch_txt):
 
 def check_for_update() -> Tuple[bool, bool]:
   setup_git_options(OVERLAY_MERGED)
-  fetch_output = None
   try:
-    fetch_output = run(["git", "fetch", "--dry-run"], OVERLAY_MERGED, low_priority=True)
-    return True, check_git_fetch_result(fetch_output)
+    git_fetch_output = run(["git", "fetch", "--dry-run"], OVERLAY_MERGED, low_priority=True)
+    return True, check_git_fetch_result(git_fetch_output)
   except subprocess.CalledProcessError:
-    # check for internet
-    if fetch_output is not None and fetch_output.startswith("fatal: unable to access") and \
-       "Could not resolve host:" in str(fetch_output):
-      return False, False
+    return False, False
 
-    raise
 
 def fetch_update(wait_helper: WaitTimeHelper) -> bool:
   cloudlog.info("attempting git fetch inside staging overlay")
@@ -337,8 +325,12 @@ def fetch_update(wait_helper: WaitTimeHelper) -> bool:
 def main():
   params = Params()
 
-  if params.get_bool("DisableUpdates"):
+  if params.get("DisableUpdates") == b"1":
     raise RuntimeError("updates are disabled by the DisableUpdates param")
+
+  # TODO: remove this after next release
+  if EON and "letv" not in open("/proc/cmdline").read():
+    raise RuntimeError("updates are disabled due to device deprecation")
 
   if EON and os.geteuid() != 0:
     raise RuntimeError("updated must be launched as root!")
@@ -375,7 +367,7 @@ def main():
 
     # Don't run updater while onroad or if the time's wrong
     time_wrong = datetime.datetime.utcnow().year < 2019
-    is_onroad = not params.get_bool("IsOffroad")
+    is_onroad = params.get("IsOffroad") != b"1"
     if is_onroad or time_wrong:
       wait_helper.sleep(30)
       cloudlog.info("not running updater, not offroad")
